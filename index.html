@@ -1,0 +1,918 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#020812">
+  <title>Jarvis</title>
+  <!-- Step 6: lets Android install Jarvis as an app -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <style>
+    :root {
+      --bg: #020812;
+      --glow: #3ec8ff;
+      --glow-soft: rgba(62, 200, 255, 0.35);
+      --glow-faint: rgba(62, 200, 255, 0.12);
+      --text: #cdefff;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      overflow-x: hidden;
+      overflow-y: auto;   /* if the window is very short, you can still scroll to the buttons */
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Faint holographic grid + scanlines over the whole screen */
+    body::before {
+      content: "";
+      position: fixed; inset: 0;
+      background:
+        repeating-linear-gradient(0deg, transparent 0 3px, rgba(62,200,255,0.04) 3px 4px),
+        radial-gradient(circle at 50% 45%, rgba(62,200,255,0.18), transparent 60%);
+      pointer-events: none;
+    }
+
+    .app {
+      position: relative;
+      min-height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+    }
+
+    header {
+      text-align: center;
+      letter-spacing: 0.5em;
+      font-size: 14px;
+      text-shadow: 0 0 8px var(--glow);
+      opacity: 0.9;
+    }
+    header small {
+      display: block;
+      margin-top: 6px;
+      font-size: 10px;
+      letter-spacing: 0.3em;
+      opacity: 0.6;
+    }
+
+    /* ---------- The glowing core ---------- */
+    .core {
+      position: relative;
+      /* Shrinks on short windows so the buttons below always fit on screen */
+      width: min(78vw, 340px, 40vh);
+      width: min(78vw, 340px, 40dvh);
+      flex-shrink: 0;
+      aspect-ratio: 1;
+      cursor: pointer;
+      border: none;
+      background: none;
+    }
+    .ring {
+      position: absolute;
+      border-radius: 50%;
+      border: 2px solid var(--glow-soft);
+      box-shadow: 0 0 12px var(--glow-soft), inset 0 0 12px var(--glow-faint);
+    }
+    .r1 { inset: 0;   border-style: dashed; animation: spin 30s linear infinite; }
+    .r2 { inset: 8%;  border-width: 1px; border-top-color: var(--glow); animation: spin 8s linear infinite reverse; }
+    .r3 { inset: 18%; border-width: 3px; border-color: var(--glow-faint); border-left-color: var(--glow); border-right-color: var(--glow); animation: spin 5s linear infinite; }
+    .r4 { inset: 28%; border-style: dotted; animation: spin 20s linear infinite reverse; }
+    .center {
+      position: absolute;
+      inset: 36%;
+      border-radius: 50%;
+      background: radial-gradient(circle, #ffffff 0%, var(--glow) 35%, rgba(62,200,255,0.2) 70%, transparent 75%);
+      box-shadow: 0 0 40px var(--glow), 0 0 90px var(--glow-soft);
+      animation: breathe 4s ease-in-out infinite;
+    }
+
+    /* States we'll switch on in later steps */
+    .core.listening .center { animation: breathe 1.2s ease-in-out infinite; }
+    .core.speaking  .center { animation: pulse 0.35s ease-in-out infinite alternate; }
+
+    @keyframes spin    { to { transform: rotate(360deg); } }
+    @keyframes breathe { 0%,100% { transform: scale(0.92); opacity: 0.85; } 50% { transform: scale(1.05); opacity: 1; } }
+    @keyframes pulse   { from { transform: scale(0.9); } to { transform: scale(1.12); } }
+
+    /* ---------- Text panels ---------- */
+    .status {
+      font-size: 12px;
+      letter-spacing: 0.35em;
+      text-transform: uppercase;
+      text-shadow: 0 0 6px var(--glow);
+    }
+    .panel {
+      width: 100%;
+      max-width: 520px;
+      min-height: 96px;
+      padding: 14px 16px;
+      border: 1px solid var(--glow-soft);
+      border-radius: 10px;
+      background: rgba(62,200,255,0.05);
+      box-shadow: 0 0 18px var(--glow-faint), inset 0 0 18px var(--glow-faint);
+      font-size: 15px;
+      line-height: 1.5;
+    }
+    .panel .you    { opacity: 0.6; font-size: 13px; margin-bottom: 6px; }
+    .panel .jarvis { text-shadow: 0 0 6px var(--glow-soft); }
+
+    .voice {
+      font: inherit; font-size: 12px; color: var(--text);
+      background: none; border: 1px solid var(--glow-faint); border-radius: 20px;
+      padding: 6px 14px; opacity: 0.7; cursor: pointer;
+    }
+    .voice::after { content: "  ⚙"; }
+
+    .debug { font-size: 10px; opacity: 0.4; text-align: center; min-height: 1.2em; font-family: Consolas, monospace; }
+    header .controls { margin-top: 14px; letter-spacing: normal; }
+    .controls { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+    .handsfree {
+      font: inherit; font-size: 12px; letter-spacing: 0.1em; color: var(--text);
+      background: none; border: 1px solid var(--glow-soft); border-radius: 20px;
+      padding: 6px 14px; cursor: pointer; opacity: 0.8;
+    }
+    .handsfree.on {
+      opacity: 1; color: #021020; background: var(--glow);
+      box-shadow: 0 0 14px var(--glow-soft);
+    }
+
+    /* Thinking: rings spin fast while Claude works out the answer */
+    .core.thinking .r2 { animation-duration: 1.2s; }
+    .core.thinking .r3 { animation-duration: 0.9s; }
+    .core.thinking .center { animation: breathe 0.9s ease-in-out infinite; }
+
+    /* Hands-free standby: quietly waiting for "Jarvis" */
+    .core.standby .center { animation: breathe 6s ease-in-out infinite; opacity: 0.75; }
+    .core.standby .r3 { animation-duration: 12s; }
+
+    /* ---------- Voice settings panel ---------- */
+    .settings {
+      position: fixed; inset: 0;
+      background: rgba(2, 8, 18, 0.85);
+      backdrop-filter: blur(4px);
+      display: none; align-items: flex-end; justify-content: center;
+      padding: 16px;
+    }
+    .settings.open { display: flex; }
+    .sheet {
+      width: 100%; max-width: 520px;
+      padding: 20px 16px;
+      border: 1px solid var(--glow-soft); border-radius: 14px;
+      background: #04101f;
+      box-shadow: 0 0 30px var(--glow-faint);
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    .sheet h2 { font-size: 13px; letter-spacing: 0.35em; font-weight: normal; text-shadow: 0 0 6px var(--glow); }
+    .sheet label { font-size: 13px; display: flex; flex-direction: column; gap: 8px; opacity: 0.9; }
+    .sheet { max-height: calc(100dvh - 32px); overflow-y: auto; }
+    .sheet h2 .opt { font-size: 10px; letter-spacing: 0.1em; opacity: 0.6; text-shadow: none; }
+    .sheet .hint { font-size: 12px; opacity: 0.65; line-height: 1.4; margin-top: -8px; }
+    .sheet input[type=password], .sheet input:not([type]) {
+      font: inherit; font-size: 15px; color: var(--text);
+      background: #071a30; border: 1px solid var(--glow-soft); border-radius: 8px; padding: 10px;
+    }
+    .cloud-status { font-size: 12px; min-height: 1em; color: #7fe3a0; }
+    .cloud-status.error { color: #ff9a8a; }
+    .sheet select {
+      font: inherit; font-size: 15px; color: var(--text);
+      background: #071a30; border: 1px solid var(--glow-soft); border-radius: 8px; padding: 10px;
+    }
+    .sheet input[type=range] { width: 100%; accent-color: var(--glow); }
+    .sheet .row { display: flex; gap: 10px; }
+    .sheet .row button {
+      flex: 1; font: inherit; font-size: 14px; padding: 12px;
+      border-radius: 8px; cursor: pointer;
+      color: var(--text); background: #071a30; border: 1px solid var(--glow-soft);
+    }
+    .sheet .row button.primary { background: var(--glow); color: #021020; border-color: var(--glow); }
+
+    .bottom { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header>
+      J · A · R · V · I · S
+      <small>PERSONAL ASSISTANT · v6.0</small>
+      <div class="controls">
+        <button class="handsfree" id="handsFree">Hands-free: OFF</button>
+        <button class="voice" id="voice" aria-label="Change voice"></button>
+      </div>
+    </header>
+
+    <button class="core" id="core" aria-label="Tap to talk">
+      <span class="ring r1"></span>
+      <span class="ring r2"></span>
+      <span class="ring r3"></span>
+      <span class="ring r4"></span>
+      <span class="center"></span>
+    </button>
+
+    <div class="bottom">
+      <div class="status" id="status">Systems online</div>
+      <div class="panel">
+        <div class="you" id="you">&nbsp;</div>
+        <div class="jarvis" id="reply">Tap the core and speak. Try “What time is it?”</div>
+      </div>
+      <div class="debug" id="debug"></div>
+    </div>
+  </main>
+
+  <div class="settings" id="settings">
+    <div class="sheet">
+      <h2>SETTINGS</h2>
+      <div class="row">
+        <button id="handsFreeSetting">Hands-free mode: OFF</button>
+      </div>
+      <h2>BRAIN <span class="opt">(Claude AI)</span></h2>
+      <p class="hint">Lets Jarvis answer any question. Paste your key from console.anthropic.com. It's stored only on this device.</p>
+      <label>Claude API key
+        <input id="claudeKey" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false">
+      </label>
+      <div class="cloud-status" id="claudeStatus"></div>
+
+      <h2>VOICE</h2>
+      <label>Voice
+        <select id="voiceSelect"></select>
+      </label>
+      <label>Speed: <span id="rateVal"></span>
+        <input type="range" id="rate" min="0.6" max="1.4" step="0.05">
+      </label>
+      <label>Depth (lower = deeper): <span id="pitchVal"></span>
+        <input type="range" id="pitch" min="0.5" max="1.5" step="0.05">
+      </label>
+
+      <h2>NATURAL CLOUD VOICE <span class="opt">(optional)</span></h2>
+      <p class="hint">Uses Microsoft Azure's human-sounding voices. Works the same on PC and phone. Leave blank to use the built-in voice.</p>
+      <label>Cloud voice
+        <select id="cloudVoice">
+          <option value="en-GB-RyanNeural">Ryan — calm, refined (recommended)</option>
+          <option value="en-GB-ThomasNeural">Thomas — deeper, measured</option>
+          <option value="en-GB-OliverNeural">Oliver — warm, mature</option>
+          <option value="en-GB-ElliotNeural">Elliot — soft-spoken</option>
+          <option value="en-GB-NoahNeural">Noah — gentle</option>
+          <option value="en-GB-AlfieNeural">Alfie — friendly</option>
+          <option value="en-GB-EthanNeural">Ethan — clear</option>
+        </select>
+      </label>
+      <label>Azure region
+        <input id="azureRegion" placeholder="e.g. uksouth" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </label>
+      <label>Azure key
+        <input id="azureKey" type="password" placeholder="Paste KEY 1 here" autocomplete="off" spellcheck="false">
+      </label>
+      <div class="cloud-status" id="cloudStatus"></div>
+
+      <div class="row">
+        <button id="testVoice">Test</button>
+        <button id="closeSettings" class="primary">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const core = document.getElementById('core');
+    const statusEl = document.getElementById('status');
+    const replyEl = document.getElementById('reply');
+    const voiceEl = document.getElementById('voice');
+
+    // ---------- Screen states ----------
+    function setState(state, label) {
+      core.className = 'core ' + state;
+      statusEl.textContent = label;
+    }
+
+    // ---------- Step 2: the calm British voice ----------
+    // British voices we like best, in order. The first one your phone/PC has wins.
+    // Calm, deep, polite British men, best first.
+    // Ryan, Thomas, Oliver… are Microsoft Edge's natural-sounding voices.
+    // Google UK English Male / Daniel / Arthur are the usual ones on Android and other devices.
+    const PREFERRED_VOICES = [
+      'Ryan', 'Thomas', 'Oliver', 'Elliot', 'Noah', 'Ethan', 'Alfie',
+      'Google UK English Male', 'Daniel', 'Arthur', 'George',
+    ];
+    let jarvisVoice = null;
+
+    // Your choices are remembered on this device.
+    // Defaults: slow (0.85×) and a little deeper (0.85).
+    const STORE_KEY = 'jarvisVoice-v2';
+    const settings = {
+      voiceName: null, rate: 0.85, pitch: 0.85,
+      // Optional natural cloud voice (Microsoft Azure). Your key is only stored on this device.
+      cloudVoice: 'en-GB-RyanNeural', azureRegion: '', azureKey: '',
+      // Step 5: Claude API key (the brain). Also only stored on this device.
+      claudeKey: '',
+    };
+    try { Object.assign(settings, JSON.parse(localStorage.getItem(STORE_KEY) || '{}')); } catch (e) {}
+    function saveSettings() {
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(settings)); } catch (e) {}
+    }
+
+    // "Natural" / "Online" voices are the high-quality, human-sounding ones.
+    const isNatural = v => /natural|online|neural/i.test(v.name);
+
+    const isBritish = v => v.lang.replace('_', '-').toLowerCase().startsWith('en-gb');
+    const shortName = v => v.name.replace(/^Microsoft\s+/, '').replace(/\s*-\s*English.*$/, '').replace(/\s*\(Natural\)/, ' (Natural)');
+
+    function pickVoice() {
+      const voices = speechSynthesis.getVoices();
+      // Natural voices first, so "Ryan (Natural)" beats a basic voice with a similar name.
+      const british = voices.filter(isBritish).sort((a, b) => isNatural(b) - isNatural(a));
+      jarvisVoice =
+        voices.find(v => v.name === settings.voiceName) ||   // the one you picked
+        PREFERRED_VOICES.map(name => british.find(v => v.name.includes(name))).find(Boolean) ||
+        british.find(v => /male/i.test(v.name) && !/female/i.test(v.name)) ||
+        british[0] ||
+        null;
+      updateVoiceLabel();
+      fillVoiceList();
+    }
+
+    const cloudReady = () => settings.azureKey.trim() && settings.azureRegion.trim();
+    let cloudFailed = false;
+
+    function updateVoiceLabel() {
+      if (cloudReady() && !cloudFailed) {
+        voiceEl.textContent = 'Voice: ' + settings.cloudVoice.replace(/^en-GB-|Neural$/g, '') + ' (natural cloud)';
+      } else if (jarvisVoice) {
+        voiceEl.textContent = 'Voice: ' + shortName(jarvisVoice);
+      } else {
+        voiceEl.textContent = speechSynthesis.getVoices().length ? 'No British voice found — tap to choose' : 'Voice settings';
+      }
+    }
+
+    // ---------- Voice settings panel ----------
+    const settingsEl = document.getElementById('settings');
+    const voiceSelect = document.getElementById('voiceSelect');
+    const rateEl = document.getElementById('rate');
+    const pitchEl = document.getElementById('pitch');
+    const rateVal = document.getElementById('rateVal');
+    const pitchVal = document.getElementById('pitchVal');
+
+    function fillVoiceList() {
+      const voices = speechSynthesis.getVoices().filter(v => v.lang.toLowerCase().startsWith('en'));
+      // British first, natural-sounding first within that, then other English voices
+      voices.sort((a, b) => isBritish(b) - isBritish(a) || isNatural(b) - isNatural(a) || a.name.localeCompare(b.name));
+      voiceSelect.innerHTML = '';
+      for (const v of voices) {
+        const opt = document.createElement('option');
+        opt.value = v.name;
+        opt.textContent = shortName(v) + (isBritish(v) ? ' — British' : ' — ' + v.lang) + (isNatural(v) ? ' ★' : '');
+        opt.selected = jarvisVoice && v.name === jarvisVoice.name;
+        voiceSelect.appendChild(opt);
+      }
+    }
+
+    function showSliderValues() {
+      rateEl.value = settings.rate;
+      pitchEl.value = settings.pitch;
+      rateVal.textContent = Number(settings.rate).toFixed(2) + '×';
+      pitchVal.textContent = Number(settings.pitch).toFixed(2);
+    }
+
+    const cloudVoiceEl = document.getElementById('cloudVoice');
+    const azureRegionEl = document.getElementById('azureRegion');
+    const azureKeyEl = document.getElementById('azureKey');
+    const cloudStatusEl = document.getElementById('cloudStatus');
+
+    function setCloudStatus(msg, isError) {
+      cloudStatusEl.textContent = msg;
+      cloudStatusEl.classList.toggle('error', !!isError);
+    }
+
+    const claudeKeyEl = document.getElementById('claudeKey');
+    const claudeStatusEl = document.getElementById('claudeStatus');
+    claudeKeyEl.addEventListener('change', () => {
+      settings.claudeKey = claudeKeyEl.value.trim();
+      saveSettings();
+      claudeStatusEl.classList.remove('error');
+      claudeStatusEl.textContent = settings.claudeKey
+        ? 'Saved — close settings and ask me something'
+        : 'No key — I\'ll use my simple built-in answers';
+    });
+
+    function showCloudSettings() {
+      claudeKeyEl.value = settings.claudeKey;
+      claudeStatusEl.textContent = settings.claudeKey ? 'Key saved ✓' : '';
+      cloudVoiceEl.value = settings.cloudVoice;
+      azureRegionEl.value = settings.azureRegion;
+      azureKeyEl.value = settings.azureKey;
+    }
+
+    function onCloudChange() {
+      settings.cloudVoice = cloudVoiceEl.value;
+      settings.azureRegion = azureRegionEl.value.trim().toLowerCase().replace(/\s+/g, '');
+      settings.azureKey = azureKeyEl.value.trim();
+      cloudFailed = false;
+      saveSettings(); updateVoiceLabel();
+      setCloudStatus(cloudReady() ? 'Saved — tap Test to check it' : '', false);
+    }
+    cloudVoiceEl.addEventListener('change', () => { onCloudChange(); if (cloudReady()) speak('Very well. This is how I shall sound from now on.'); });
+    azureRegionEl.addEventListener('change', onCloudChange);
+    azureKeyEl.addEventListener('change', onCloudChange);
+
+    voiceEl.addEventListener('click', () => { fillVoiceList(); showSliderValues(); showCloudSettings(); settingsEl.classList.add('open'); });
+    document.getElementById('closeSettings').addEventListener('click', () => settingsEl.classList.remove('open'));
+    settingsEl.addEventListener('click', e => { if (e.target === settingsEl) settingsEl.classList.remove('open'); });
+
+    voiceSelect.addEventListener('change', () => {
+      settings.voiceName = voiceSelect.value; saveSettings(); pickVoice();
+      speak('Very well. This is how I shall sound from now on.');
+    });
+    rateEl.addEventListener('input', () => { settings.rate = Number(rateEl.value); saveSettings(); showSliderValues(); });
+    pitchEl.addEventListener('input', () => { settings.pitch = Number(pitchEl.value); saveSettings(); showSliderValues(); });
+    document.getElementById('testVoice').addEventListener('click', () =>
+      speak('At your service. I have taken the liberty of running a full diagnostic. Everything appears to be in order.'));
+
+    pickVoice();
+    speechSynthesis.addEventListener('voiceschanged', pickVoice);
+
+    // Step 6: register the small helper that makes Jarvis installable on a phone.
+    if ('serviceWorker' in navigator && window.isSecureContext) {
+      navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service worker not registered:', err));
+    }
+
+    // ---------- Speaking ----------
+    // Uses the natural Azure cloud voice if you've set it up, otherwise the device's built-in voice.
+    const audio = new Audio();
+    let speaking = false;
+    let speechId = 0;   // each sentence gets a number, so an interrupted one can't confuse things
+
+    function stopSpeaking() {
+      speechSynthesis.cancel();
+      audio.pause();
+    }
+
+    // Stop talking right now (e.g. you tapped the core mid-sentence).
+    function interrupt() {
+      speechId++;
+      stopSpeaking();
+      speaking = false;
+    }
+
+    // Called when Jarvis finishes a sentence. In hands-free mode, start listening again.
+    function speechFinished(id) {
+      if (id !== speechId) return;
+      speaking = false;
+      setState('', idleLabel());
+      if (handsFree) setTimeout(startRecognizer, 300);
+    }
+
+    async function speak(text) {
+      const id = ++speechId;
+      speaking = true;
+      if (listening && recognizer) recognizer.abort();   // don't let Jarvis hear himself
+      stopSpeaking();
+      replyEl.textContent = text;
+      if (cloudReady()) {
+        try {
+          await speakCloud(text, id);
+          cloudFailed = false; updateVoiceLabel(); setCloudStatus('Connected ✓', false);
+          return;
+        } catch (err) {
+          if (id !== speechId) return;   // interrupted while loading
+          console.warn('Cloud voice failed, using built-in voice instead:', err);
+          cloudFailed = true; updateVoiceLabel(); setCloudStatus(err.message, true);
+        }
+      }
+      speakBuiltIn(text, id);
+    }
+
+    function speakBuiltIn(text, id) {
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'en-GB';
+      if (jarvisVoice) u.voice = jarvisVoice;
+      u.rate = settings.rate;                   // under 1 = slower and calmer
+      u.pitch = settings.pitch;                 // under 1 = deeper
+      u.onstart = () => { if (id === speechId) setState('speaking', 'Speaking…'); };
+      u.onend = u.onerror = () => speechFinished(id);
+      speechSynthesis.speak(u);
+    }
+
+    const escapeXml = s => s.replace(/[<>&'"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
+
+    async function speakCloud(text, id) {
+      setState('', 'Thinking…');
+      const rate = Math.round((settings.rate - 1) * 100) + '%';       // 0.85 → -15%
+      const pitch = Math.round((settings.pitch - 1) * 50) + '%';      // 0.85 → -8% (gentler)
+      const ssml =
+        `<speak version="1.0" xml:lang="en-GB"><voice name="${settings.cloudVoice}">` +
+        `<prosody rate="${rate}" pitch="${pitch}">${escapeXml(text)}</prosody></voice></speak>`;
+      const res = await fetch(`https://${settings.azureRegion.trim()}.tts.speech.microsoft.com/cognitiveservices/v1`, {
+        method: 'POST',
+        headers: {
+          'Ocp-Apim-Subscription-Key': settings.azureKey.trim(),
+          'Content-Type': 'application/ssml+xml',
+          'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3',
+        },
+        body: ssml,
+      }).catch(() => { throw new Error('Could not reach Azure (check internet / region name)'); });
+      if (res.status === 401) throw new Error('Azure says the key is wrong for this region');
+      if (!res.ok) throw new Error('Azure error ' + res.status);
+      const blob = await res.blob();
+      if (id !== speechId) return;   // interrupted while loading
+      if (audio.src) URL.revokeObjectURL(audio.src);
+      audio.src = URL.createObjectURL(blob);
+      audio.onplay = () => setState('speaking', 'Speaking…');
+      audio.onended = audio.onerror = () => speechFinished(id);
+      await audio.play();
+    }
+
+    function greeting() {
+      const h = new Date().getHours();
+      const part = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+      return part + '. All systems are online, and at your disposal. How may I be of assistance?';
+    }
+
+    // ---------- Step 3 + 4: listening and hands-free mode ----------
+    const youEl = document.getElementById('you');
+    const handsFreeBtn = document.getElementById('handsFree');
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognizer = null;
+    let listening = false;
+    let handsFree = false;        // Step 4: always listening for "Jarvis"
+    let awaitingCommand = false;  // heard "Jarvis", now waiting for what you want
+
+    // Speech recognition sometimes mishears the name, so accept close variants.
+    const WAKE_WORD = /\b(?:jarvis|jervis|jarvas|javis|jarvi|jarves|jarvie|jarv|travis|charvis|davis)(?:'s)?\b/i;
+
+    const idleLabel = () => (handsFree ? 'Say “Jarvis”…' : 'Systems online');
+
+    function startRecognizer() {
+      if (!Recognition) {
+        handsFree = false; updateHandsFreeButton();
+        speak("I'm afraid this browser can't hear you. Please open me in Chrome or Edge.");
+        return;
+      }
+      if (listening || speaking || thinking) return;
+      if (handsFree && document.hidden) return;   // phone screen off / app in background
+
+      let handled = false;
+      const commandMode = awaitingCommand || !handsFree;
+      recognizer = new Recognition();
+      recognizer.lang = 'en-GB';
+      recognizer.interimResults = true;   // show words as you speak
+      recognizer.continuous = false;      // one sentence at a time (most reliable on Android)
+
+      recognizer.onstart = () => {
+        listening = true;
+        debug(commandMode ? 'listening for a command' : 'standby: waiting for "Jarvis"');
+        if (commandMode) {
+          setState('listening', 'Listening…');
+          youEl.textContent = 'You: …';
+        } else {
+          setState('standby', idleLabel());
+        }
+      };
+
+      recognizer.onresult = (e) => {
+        const text = Array.from(e.results).map(r => r[0].transcript).join(' ').trim();
+        const isFinal = e.results[e.results.length - 1].isFinal;
+        if (commandMode) {
+          youEl.textContent = 'You: ' + text;
+        } else if (WAKE_WORD.test(text)) {
+          setState('listening', 'Listening…');   // react as soon as the name is heard
+          youEl.textContent = 'You: ' + text;
+        } else {
+          youEl.textContent = '(heard: ' + text + ')';   // shows he can hear you, just not his name
+        }
+        if (isFinal) debug('heard "' + text + '"' + (commandMode || WAKE_WORD.test(text) ? '' : ' — no wake word'));
+        if (isFinal && !handled) {
+          handled = true;
+          heard(text, commandMode);
+        }
+      };
+
+      recognizer.onerror = (e) => {
+        debug('recognition error: ' + e.error);
+        if (e.error === 'no-speech' || e.error === 'aborted') {
+          // Silence is normal in hands-free mode; only mention it if you tapped to talk.
+          if (e.error === 'no-speech' && !handsFree) { handled = true; speak("I'm sorry, I didn't catch that."); }
+          return;
+        }
+        handled = true;
+        handsFree = false; awaitingCommand = false; updateHandsFreeButton();
+        if (e.error === 'not-allowed' && micStatus === 'ok') {
+          speak("The microphone itself works, but the browser's speech recognition was refused. Error code: not allowed.");
+        } else if (e.error === 'not-allowed') {
+          speak("I don't have permission to use the microphone. Please allow it in the browser and try again.");
+        } else if (e.error === 'service-not-allowed') {
+          speak("The microphone is fine, but this browser's speech recognition service is switched off or blocked on this computer.");
+        } else if (e.error === 'network') {
+          speak("I can't reach the speech recognition service. Please check your internet connection.");
+        } else if (e.error === 'audio-capture') {
+          speak("I can't find a microphone on this device.");
+        } else {
+          speak('Something went wrong while listening. Error: ' + e.error);
+        }
+      };
+
+      recognizer.onend = () => {
+        listening = false;
+        if (speaking || thinking) return;                   // Jarvis is answering; he'll resume afterwards
+        if (commandMode && !handled) awaitingCommand = false;  // you said nothing after "Jarvis"
+        if (handsFree) setTimeout(startRecognizer, 250);   // keep listening
+        else if (!handled) setState('', idleLabel());
+      };
+
+      try {
+        recognizer.start();
+      } catch (err) {
+        // Edge sometimes refuses to restart this quickly; try again shortly.
+        listening = false;
+        debug('restart refused (' + err.name + '), retrying…');
+        if (handsFree) setTimeout(startRecognizer, 1000);
+      }
+    }
+
+    // Safety net: if hands-free is on but nothing is listening or speaking, start again.
+    setInterval(() => {
+      if (handsFree && !listening && !speaking && !thinking && !document.hidden) {
+        debug('watchdog restarted listening');
+        startRecognizer();
+      }
+    }, 3000);
+
+    // ---------- Diagnostics line (small text under the buttons) ----------
+    const debugEl = document.getElementById('debug');
+    function debug(msg) {
+      debugEl.textContent = new Date().toLocaleTimeString('en-GB') + ' · ' + msg;
+      console.log('[Jarvis]', msg);
+    }
+
+    // What to do with a finished sentence.
+    function heard(text, commandMode) {
+      if (commandMode) {
+        awaitingCommand = false;
+        respond(text);
+        return;
+      }
+      // Hands-free standby: ignore everything until the name is said.
+      const match = text.match(WAKE_WORD);
+      if (!match) return;
+      const command = text.slice(match.index + match[0].length).replace(/^[\s,.!?]+/, '').trim();
+      if (command.split(' ').length >= 2) {
+        respond(command);                 // "Jarvis, what time is it?" in one go
+      } else {
+        awaitingCommand = true;           // just "Jarvis" → ask what you need, then listen
+        speak('Yes?');
+      }
+    }
+
+    // ---------- Microphone check (runs once, the first time you tap) ----------
+    // Asks the browser for the microphone directly, so we know whether permission
+    // and the device are fine before blaming speech recognition.
+    let micStatus = 'unknown';
+    async function checkMic() {
+      if (micStatus === 'ok') return true;
+      if (!navigator.mediaDevices?.getUserMedia) { micStatus = 'unsupported'; debug('mic check: not supported here'); return true; }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const label = stream.getAudioTracks()[0]?.label || 'unknown device';
+        stream.getTracks().forEach(t => t.stop());
+        micStatus = 'ok';
+        debug('microphone OK: ' + label);
+        return true;
+      } catch (err) {
+        micStatus = err.name;
+        debug('mic check failed: ' + err.name);
+        if (err.name === 'NotAllowedError') {
+          speak("The browser is blocking my microphone. Click the icon on the left of the address bar, set Microphone to Allow, and refresh the page.");
+        } else if (err.name === 'NotFoundError') {
+          speak("I can't find a microphone. Please plug one in or check your sound settings.");
+        } else if (err.name === 'NotReadableError') {
+          speak("The microphone is busy or switched off. Close any app that might be using it, such as Teams, and try again.");
+        } else {
+          speak('I could not open the microphone. Error: ' + err.name);
+        }
+        return false;
+      }
+    }
+
+    // Tap the core: talk to Jarvis (or interrupt him).
+    core.addEventListener('click', async () => {
+      if (!(await checkMic())) return;
+      if (speaking) {
+        interrupt();
+        setState('', idleLabel());
+        if (handsFree) setTimeout(startRecognizer, 300);
+        return;
+      }
+      if (handsFree) {
+        // Skip the wake word: go straight to listening for a command.
+        awaitingCommand = true;
+        if (listening) recognizer.abort(); else startRecognizer();
+        return;
+      }
+      if (listening) { recognizer.abort(); setState('', idleLabel()); }
+      else startRecognizer();
+    });
+
+    // ---------- Hands-free on/off ----------
+    let wakeLock = null;
+    async function keepScreenOn(on) {
+      try {
+        if (on && 'wakeLock' in navigator && !document.hidden) wakeLock = await navigator.wakeLock.request('screen');
+        if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+      } catch (e) { /* not supported or not allowed — fine */ }
+    }
+
+    // The same switch also lives in the ⚙ settings panel.
+    const handsFreeSetting = document.getElementById('handsFreeSetting');
+    handsFreeSetting.addEventListener('click', () => handsFreeBtn.click());
+
+    function updateHandsFreeButton() {
+      handsFreeBtn.textContent = handsFree ? 'Hands-free: ON' : 'Hands-free: OFF';
+      handsFreeBtn.classList.toggle('on', handsFree);
+      handsFreeSetting.textContent = handsFree ? 'Hands-free mode: ON' : 'Hands-free mode: OFF';
+      handsFreeSetting.classList.toggle('primary', handsFree);
+      if (!handsFree) keepScreenOn(false);
+    }
+
+    handsFreeBtn.addEventListener('click', async () => {
+      if (!handsFree && !(await checkMic())) return;
+      handsFree = !handsFree;
+      awaitingCommand = false;
+      updateHandsFreeButton();
+      if (handsFree) {
+        keepScreenOn(true);
+        speak('Hands-free mode engaged. Simply say my name when you need me.');
+      } else {
+        if (listening) recognizer.abort();
+        interrupt();
+        setState('', idleLabel());
+        speak('Hands-free mode disengaged.');
+      }
+    });
+
+    // Phones stop the microphone when the screen turns off; pick up again when you come back.
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && handsFree) {
+        keepScreenOn(true);
+        if (!listening && !speaking) startRecognizer();
+      }
+    });
+
+    // ---------- Simple built-in answers (real intelligence arrives in Step 5) ----------
+    function ordinal(n) {
+      const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+      return n + (s[(v - 20) % 10] || s[v] || s[0]);
+    }
+
+    function respond(heard) {
+      const t = heard.toLowerCase();
+      const now = new Date();
+      let reply;
+
+      // Time and date are answered instantly on the device (free and fast).
+      if (/\bwhat('?s| is) the time\b|\bwhat time\b|\btime is it\b/.test(t)) {
+        const time = now.toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true });
+        reply = `It is ${time}.`;
+      } else if (/\bwhat('?s| is) (the )?date\b|\bwhat day is it\b|\bwhat('?s| is) today\b/.test(t)) {
+        const day = now.toLocaleDateString('en-GB', { weekday: 'long' });
+        const month = now.toLocaleDateString('en-GB', { month: 'long' });
+        reply = `Today is ${day}, the ${ordinal(now.getDate())} of ${month}.`;
+      } else if (claudeReady()) {
+        askClaude(heard);   // Step 5: everything else goes to Claude
+        return;
+      } else if (/\b(who are you|your name|what are you)\b/.test(t)) {
+        reply = 'I am Jarvis, your personal assistant. Always at your service.';
+      } else if (/\bhow are you\b/.test(t)) {
+        reply = 'All systems are functioning normally. Thank you for asking.';
+      } else if (/\b(thank you|thanks|cheers)\b/.test(t)) {
+        reply = 'You are most welcome.';
+      } else if (/\bjoke\b/.test(t)) {
+        reply = 'I once tried to organise my memory banks alphabetically. It was a rather byte-sized disaster.';
+      } else if (/\b(hello|hi|hey|good (morning|afternoon|evening)|jarvis)\b/.test(t)) {
+        reply = greeting();
+      } else {
+        reply = "I'm afraid that is beyond my current capabilities. Please add a Claude key in my settings to give me my full intelligence.";
+      }
+      speak(reply);
+    }
+
+    // ---------- Step 5: the brain (Claude) ----------
+    // The official Anthropic JavaScript SDK, loaded from a CDN the first time it's needed.
+    const SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.3.0/+esm';
+    const CLAUDE_MODEL = 'claude-opus-5-5';
+
+    const JARVIS_PERSONA = `You are Jarvis, a personal voice assistant with the manner of a calm, polite, quietly witty British butler.
+Everything you write is read aloud by a text-to-speech voice, so:
+- Answer in one to three short spoken sentences unless the user asks for more detail.
+- Never use markdown, bullet points, headings, emoji, URLs or code blocks.
+- Write numbers, units and abbreviations the way they should be spoken.
+- Be warm and courteous, with an occasional dry touch of humour, but never long-winded.
+- Each user message starts with the user's local time in square brackets; use it when relevant and never read it back unprompted.
+- Use web search only for things that need current information, such as weather, news, sports results or opening hours.
+- If you don't know something or can't do it (for example, controlling devices or sending messages), say so plainly and briefly.`;
+
+    let Anthropic = null;      // the SDK module, once loaded
+    let claudeClient = null;
+    let claudeClientKey = '';
+    let conversation = [];     // this chat's history, so Jarvis remembers what you said
+    let lastTurnAt = 0;
+    let thinking = false;
+
+    const claudeReady = () => !!settings.claudeKey.trim();
+
+    async function getClaude() {
+      if (!Anthropic) Anthropic = (await import(SDK_URL)).default;
+      if (!claudeClient || claudeClientKey !== settings.claudeKey) {
+        claudeClient = new Anthropic({
+          apiKey: settings.claudeKey.trim(),
+          dangerouslyAllowBrowser: true,   // OK here: the key is yours and stays on your own device
+          maxRetries: 1,
+          timeout: 60 * 1000,
+        });
+        claudeClientKey = settings.claudeKey;
+      }
+      return claudeClient;
+    }
+
+    async function askClaude(heard) {
+      thinking = true;
+      if (listening && recognizer) recognizer.abort();
+      setState('thinking', 'Thinking…');
+      debug('asking Claude…');
+
+      // Start a fresh conversation after 10 quiet minutes, or once it gets long.
+      if (Date.now() - lastTurnAt > 10 * 60 * 1000 || conversation.length > 40) conversation = [];
+      const localTime = new Date().toLocaleString('en-GB', {
+        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit',
+      });
+      conversation.push({ role: 'user', content: `[${localTime}] ${heard}` });
+
+      let reply;
+      try {
+        const client = await getClaude();
+        let response;
+        for (let round = 0; round < 3; round++) {
+          response = await client.beta.messages.create({
+            model: CLAUDE_MODEL,
+            max_tokens: 16000,
+            betas: ['server-side-fallback-2026-07-01'],
+            fallbacks: 'default',                       // if a request is declined, retry on a fallback model
+            output_config: { effort: 'low' },           // quick, conversational answers
+            system: JARVIS_PERSONA,
+            tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 2 }],
+            messages: conversation,
+          });
+          conversation.push({ role: 'assistant', content: response.content });   // keep everything, unchanged
+          if (response.stop_reason !== 'pause_turn') break;                       // long web searches can pause; continue them
+        }
+
+        if (response.stop_reason === 'refusal') {
+          reply = "I'm afraid that's not something I can help with.";
+        } else {
+          reply = response.content
+            .filter(b => b.type === 'text')
+            .map(b => b.text)
+            .join('')
+            .replace(/[*_#`>]/g, '')          // just in case: no markdown symbols read aloud
+            .replace(/\s+/g, ' ')
+            .trim() || "I'm terribly sorry, I seem to have lost my train of thought.";
+        }
+        lastTurnAt = Date.now();
+        debug('Claude answered');
+      } catch (err) {
+        conversation = [];   // start clean next time
+        console.warn('Claude error:', err);
+        debug('Claude error: ' + (err.status || err.name));
+        if (Anthropic && err instanceof Anthropic.AuthenticationError) {
+          reply = 'My Claude key appears to be invalid. Please check it in my settings.';
+        } else if (Anthropic && err instanceof Anthropic.PermissionDeniedError) {
+          reply = "My Claude key doesn't have permission for this. Please check your Anthropic account.";
+        } else if (Anthropic && err instanceof Anthropic.RateLimitError) {
+          reply = "I'm being asked too many questions at once. Please try again in a moment.";
+        } else if (Anthropic && err instanceof Anthropic.APIConnectionError) {
+          reply = "I can't reach my brain at the moment. Please check the internet connection.";
+        } else if (Anthropic && err instanceof Anthropic.BadRequestError && /credit|billing|balance/i.test(err.message)) {
+          reply = 'My Anthropic account appears to be out of credit. Please top it up in the Anthropic console.';
+        } else if (!Anthropic) {
+          reply = "I couldn't load my brain. Please check the internet connection.";
+        } else {
+          reply = 'Something went wrong while I was thinking. Error ' + (err.status || err.name) + '.';
+        }
+      }
+      thinking = false;
+      speak(reply);
+    }
+  </script>
+</body>
+</html>
